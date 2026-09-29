@@ -9,7 +9,18 @@ ujust report                      # collect diagnostics, review locally, upload 
 ujust report --confirm <issue>    # post a lightweight fingerprint comment on an existing issue
 ```
 
-`<issue>` is a positive issue number (routed to the booted image's own tracker: Bluefin LTS → `projectbluefin/bluefin-lts`, Bluefin → `projectbluefin/bluefin`, Dakota → `projectbluefin/dakota`, unknown → `projectbluefin/common`) or a full `https://github.com/OWNER/REPO/issues/N` URL, which uses its own repository and number.
+`<issue>` is a positive issue number (routed to the booted image's own tracker) or a full `https://github.com/OWNER/REPO/issues/N` URL, which uses its own repository and number.
+
+Routing is decided by `system_files/shared/usr/libexec/ublue-image-repo` in `projectbluefin/common`, which is the single source of truth; it takes the image **name and tag**, not the name alone:
+
+| Image name | Tag | Tracker |
+|------------|-----|---------|
+| `bluefin-lts*` | any | `projectbluefin/bluefin-lts` |
+| `bluefin` | `lts*` | `projectbluefin/bluefin-lts` (the plain image publishes the LTS stream under `lts*` tags) |
+| `bluefin` (other tags), `bluefin*` | any | `projectbluefin/bluefin` |
+| `dakota*` | any | `projectbluefin/dakota` |
+| unknown / absent | `lts*` | `projectbluefin/bluefin-lts` |
+| unknown / absent | other | caller-supplied default (`projectbluefin/common` for `ujust report`) |
 
 `--confirm` is implemented by `confirm_report` in `projectbluefin/common`, `system_files/bluefin/usr/libexec/bonedigger-report`. It:
 

@@ -41,6 +41,14 @@ Fleet identity is **two random tokens created locally on explicit opt-in**, not 
 
 Both are lowercase hex, 16 characters. Neither is a hash, so there is nothing to reverse and nothing to dictionary-attack.
 
+**Validation (MUST).** Every `fleet` and `machine` value is untrusted input until checked against `^[0-9a-f]{16}$`:
+
+- `--fleet-join <fleet>` MUST reject any argument that does not match, before writing `fleet.json` or previewing anything.
+- Loading `fleet.json` MUST re-validate both values and refuse to emit a tag if either fails (treat the file as corrupt, report it, post untagged).
+- No value that failed validation is ever interpolated into a preview, comment marker or issue body.
+
+This is not only a hygiene rule: the marker lives inside an HTML comment, so an unvalidated value containing `-->` would close the marker early and render attacker- or typo-supplied markdown inside the user's own posted comment.
+
 State lives in one user-owned file, `${XDG_CONFIG_HOME:-$HOME/.config}/bonedigger/fleet.json`, mode `0600`, containing `{"version":1,"fleet":"…","machine":"…"}`. Its absence means "not enrolled".
 
 Adding a second machine to a fleet is explicit and manual: run `ujust report --fleet-join <fleet>` on it (the user copies the 16-character fleet value). This generates a new `machine` token locally. No secret or credential is transferred, and fleet is not a secret — it only groups.
@@ -76,7 +84,7 @@ Nothing is sent unless `fleet.json` exists. Enrollment never happens as a side e
 | Command | Effect |
 |---------|--------|
 | `ujust report --fleet-enroll` | Explain what will be posted, ask `gum confirm`, create `fleet.json` with fresh tokens |
-| `ujust report --fleet-join <fleet>` | Same, reusing the given `fleet` value with a new `machine` token |
+| `ujust report --fleet-join <fleet>` | Same, reusing the given `fleet` value (rejected unless it matches `^[0-9a-f]{16}$`) with a new `machine` token |
 | `ujust report --fleet-forget` | Delete `fleet.json`. Later reports and confirmations carry no tag |
 | `ujust report --fleet-forget --purge` | As above, then strip the marker from the user's own past comments (see below) |
 | `ujust report --no-fleet` | Skip the tag for one invocation without un-enrolling |
@@ -88,7 +96,12 @@ The full tag is shown in the local preview before anything is posted, exactly as
 Tags are posted publicly as part of the user's own comment or issue body, so they are the user's content:
 
 - `--fleet-forget` stops future disclosure. It cannot recall what was already posted; the command says so.
-- `--purge` finds the user's marker-bearing comments (`gh api` on the search/comments endpoints, filtered to the authenticated login) and **edits** them to remove only the marker line. Editing rather than deleting keeps the confirmation and its digest evidence; the comment then counts as an untagged confirmation. GitHub retains edit history of comments; the command must say that, and that a user who needs the history gone must delete the comment through GitHub.
+- `--purge` **edits** the user's own marker-bearing issue bodies and comments to remove only the marker line. GitHub has no comment-search API, and marker text inside an HTML comment is not reliably indexed by issue search, so discovery cannot be a single query. The mechanism is:
+  1. `gh search issues --author @me` and `gh search issues --commenter @me` (across the trackers in the routing table, `--state all`) to get candidate issues — these search by participation, not by marker text;
+  2. for each candidate, `gh api --paginate repos/OWNER/REPO/issues/N/comments` plus the issue body, keep only items whose author login equals the authenticated login and whose body matches the marker regex;
+  3. `gh issue comment --edit-last` is not sufficient; edit each match by id via `gh api --method PATCH repos/OWNER/REPO/issues/comments/<id>` (or `.../issues/N` for a body).
+
+  Editing rather than deleting keeps the confirmation and its digest evidence; the item then counts as an untagged confirmation. GitHub retains edit history of comments; the command must say that, and that a user who needs the history gone must delete the comment through GitHub. Known limit: `gh search issues` only reaches issues the search index returns for that login, so `--purge` is best-effort and must report how many items it examined and edited rather than claiming completeness (see [Open review questions](#open-review-questions)).
 - Rotation: `--fleet-forget` followed by `--fleet-enroll` produces new, unlinkable tokens.
 
 ## Comment marker
@@ -105,22 +118,24 @@ Parsers must ignore any comment whose marker does not match this exact pattern, 
 
 Counts are derived read-side from the issue's comments; no state is stored anywhere but the comments themselves.
 
-- **confirmations** — number of confirmation comments (unchanged v1 meaning). A confirmation comment is one whose body starts with the header ``**System fingerprint** (via `ujust report --confirm`)`` emitted by `confirm_report` in `common`'s `/usr/libexec/bonedigger-report`. Triage, discussion and bot comments on the same issue are not confirmations and must not be counted.
-- **machines** — number of distinct `(author, fleet, machine)` triples among tagged confirmations.
-- **fleets** — number of distinct `(author, fleet)` pairs.
+- **confirmations** — number of confirmation comments (unchanged v1 meaning). A confirmation comment is one whose body starts with the header ``**System fingerprint** (via `ujust report --confirm`)`` emitted by `confirm_report` in `common`'s `/usr/libexec/bonedigger-report`. Triage, discussion and bot comments on the same issue are not confirmations and must not be counted. The issue body is **not** a confirmation, so the reporter never inflates this number.
+- **machines** — number of distinct `(author, fleet, machine)` triples among tagged confirmations **and the tagged issue body**. The reporter's own machine is an affected machine, so its marker counts once, attributed to the issue author.
+- **fleets** — number of distinct `(author, fleet)` pairs over the same set.
 - Untagged confirmations (opt-out users) are counted in `confirmations` only. Their issue data is never altered.
 
 Presentation on the issue: `N confirmations · M distinct machines in F fleets (K untagged)`.
 
-Reference implementation (input is the issue's comment list, e.g. `gh api --paginate repos/OWNER/REPO/issues/N/comments`; output verified against the acceptance cases below):
+Reference implementation (input is `{"issue": <issue object>, "comments": [<comment objects>]}`, e.g. from `gh api repos/OWNER/REPO/issues/N` and `gh api --paginate repos/OWNER/REPO/issues/N/comments`; output verified against the acceptance cases below):
 
 ```jq
 def is_confirmation:
   test("^\\*\\*System fingerprint\\*\\* \\(via `ujust report --confirm`\\)");
 def tag:
   capture("<!-- bonedigger-fleet: v1 fleet=(?<fleet>[0-9a-f]{16}) machine=(?<machine>[0-9a-f]{16}) -->") // null;
-[ .[] | select(.body | is_confirmation) | {author: .user.login, tag: (.body | tag)} ] as $c
-| ($c | map(select(.tag != null))) as $t
+[ .comments[] | select(.body | is_confirmation) | {author: .user.login, tag: (.body | tag)} ] as $c
+| ($c | map(select(.tag != null))) as $ct
+| ([ {author: .issue.user.login, tag: (.issue.body | tag)} ] | map(select(.tag != null))) as $bt
+| ($ct + $bt) as $t
 | {
     confirmations: ($c | length),
     tagged: ($t | length),
@@ -129,9 +144,9 @@ def tag:
   }
 ```
 
-`gh api --paginate` emits one JSON array per page; merge them first with `jq -s add`, then apply the filter with `jq -f`.
+`gh api --paginate` emits one JSON array per page; merge them first with `jq -s add`, then combine with the issue object (e.g. `jq -n --slurpfile i issue.json --slurpfile c comments.json '{issue: $i[0], comments: ($c | add)}'`) before applying the filter with `jq -f`.
 
-The `is_confirmation` guard is what keeps the input honest: `repos/OWNER/REPO/issues/N/comments` returns every comment, including triage and bot chatter, and counting those would inflate `confirmations`. A consumer that already receives a pre-filtered confirmation-only list can drop the `select`, but must then guarantee the filtering elsewhere.
+The `is_confirmation` guard is what keeps the input honest: `repos/OWNER/REPO/issues/N/comments` returns every comment, including triage and bot chatter, and counting those would inflate `confirmations`. A consumer that already receives a pre-filtered confirmation-only list can drop the `select`, but must then guarantee the filtering elsewhere. The issue body deliberately bypasses the guard: it is read for its marker only, contributes to `machines` / `fleets`, and never to `confirmations`.
 
 ## Surfacing fleet-relevant issues — `ujust fleet-status`
 
@@ -159,7 +174,7 @@ Confirmation-count escalation is a downstream intake concern, not something this
 | Acceptance criterion | How it is satisfied | Verification |
 |----------------------|--------------------|--------------|
 | Report without opting in sends no fleet tag; tag not reversible to a hostname and removable | Tag only emitted if `fleet.json` exists; tokens are random, not derived; `--fleet-forget[--purge]` | Client test: no `bonedigger-fleet` string in body without `fleet.json`; tokens uncorrelated with hostname/machine-id; after `--fleet-forget` no marker |
-| Three confirmations from one device = 1 machine; three opted-in machines = 3 | `(author, fleet, machine)` distinct count | Run the jq above: 3 comments with the same triple → `machines: 1`; 3 distinct `machine` values → `machines: 3` |
+| Three confirmations from one device = 1 machine; three opted-in machines = 3 | `(author, fleet, machine)` distinct count over tagged confirmations plus the tagged issue body | Run the jq above: 3 comments with the same triple (untagged issue body) → `machines: 1`; 3 distinct `machine` values → `machines: 3`, including the case where one of the three is the reporter's tagged issue body plus 2 confirmations |
 | `ujust fleet-status` lists only relevant open issues with digest evidence; no consent-less enrollment | Local digest search + local verification; never writes `fleet.json` | Client test: closed and non-matching issues omitted; `fleet.json` absent afterward |
 | Confirmation-count escalation behaves identically with fleet correlation on or off | Fleet counts are display-only | Escalation input is `confirmations`; same fixture with and without markers yields the same value |
 
@@ -171,6 +186,7 @@ These need a maintainer / security decision before implementation:
 2. Approve 64-bit token length. Collisions matter only within one `(author, fleet)`, where the birthday bound at 64 bits is negligible for any realistic fleet.
 3. Approve edit-not-delete as the `--purge` behaviour, given GitHub retains comment edit history.
 4. Decide where the `machines` / `fleets` line is rendered (Hive-maintained issue summary vs. a local `ujust` view only).
+5. Accept that `--purge` discovery is best-effort (GitHub has no comment-search API; participation search is the only entry point), or drop `--purge` in favour of pointing users at their GitHub comment list.
 
 ## Related
 
