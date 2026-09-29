@@ -5,7 +5,8 @@ Load when working on the client-side diagnostic reporting tool in `projectbluefi
 ## Commands
 
 ```bash
-ujust report         # collect diagnostics, review locally, upload to gist, open issue
+ujust report                  # collect diagnostics, review locally, upload to gist, open issue
+ujust report --confirm <issue #|issue URL>   # post a system-fingerprint comment confirming an issue is fixed
 ```
 
 ## What `ujust report` collects
@@ -177,6 +178,26 @@ $XDG_RUNTIME_DIR/ujust-report/report-XXXXXX/
 ```
 
 Temp directory is cleaned up on EXIT trap. Use `trap - EXIT; exit 0` to preserve files when user cancels.
+
+## Confirming an issue
+
+Issue #1's second half of the reporting loop: after `ujust report` opens an issue, the user must be told which image to rebase to and then how to confirm the issue is fixed.
+
+```bash
+ujust report --confirm <issue-number-or-url>
+```
+
+- Accepts a bare issue number (routed to the booted image's own repo) or a full `https://github.com/owner/repo/issues/N` URL.
+- Collects the live system fingerprint — image ref, tag, version, digest, kernel, arch, failed systemd units — and posts it as a comment on the issue after a `gum confirm` prompt.
+- The reported image ref / tag / version / digest is exactly which image the user is on; it is what the user (or a maintainer) compares against the build the fix shipped in.
+
+Workflow that satisfies the issue:
+
+1. A fix lands in an image. The maintainer (or Hive) tells the user the exact image/tag to rebase to.
+2. The user rebases to that image (`bootc upgrade` / `ujust update`).
+3. The user runs `ujust report --confirm <issue#>`, which posts the fingerprint comment proving they are on the fixed build.
+
+The recipe is image content, not a bonedigger template — it lives in `projectbluefin/common` (`system_files/bluefin/usr/libexec/bonedigger-report`, invoked by `60-bonedigger.just`). This section documents its behaviour for agents working on the reporting framework spec. Do not copy it into `templates/` or re-implement it in bonedigger.
 
 ## Consumer context (read before proposing design changes)
 
