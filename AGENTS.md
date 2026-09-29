@@ -39,6 +39,7 @@ Never report success before running these checks and reading the output.
 | [`bonedigger-overview`](docs/skills/bonedigger-overview.md) | Starting any work in this repo — architecture, user commands, repo layout |
 | [`bonedigger-ujust`](docs/skills/bonedigger-ujust.md) | Working on the `ujust report` diagnostics framework, PII scrubbing, OTel specs, or gist intake |
 | [`bonedigger-templates`](docs/skills/bonedigger-templates.md) | Adding, editing, or syncing GitHub issue templates; working on `sync-templates.yml` |
+| [`bonedigger-fleet`](docs/skills/bonedigger-fleet.md) | Working on the v2 opt-in fleet tag, distinct-machine confirmation counts, or `ujust fleet-status` |
 
 ## Quick orientation
 
