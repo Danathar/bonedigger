@@ -196,3 +196,7 @@ The recipe and OTel config are **image content**, not CI tooling. They live in `
 `common` ships both files to every image via `common.bst`. Dakota and bluefin inherit them automatically — do **not** add copies to those repos.
 
 **Sync workflows are the wrong answer.** If you find yourself creating a workflow to copy these files from bonedigger to common (or anywhere else), stop: the file is in the wrong repo. Edit it directly in common.
+
+## Related
+
+- [`bonedigger-screenshots`](bonedigger-screenshots.md) — how `ujust report` can capture and analyze a screenshot / screen photo on-device (the extension to this flow for users who can't take a clean screenshot).

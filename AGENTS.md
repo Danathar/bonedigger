@@ -39,6 +39,7 @@ Never report success before running these checks and reading the output.
 | [`bonedigger-overview`](docs/skills/bonedigger-overview.md) | Starting any work in this repo — architecture, user commands, repo layout |
 | [`bonedigger-ujust`](docs/skills/bonedigger-ujust.md) | Working on the `ujust report` diagnostics framework, PII scrubbing, OTel specs, or gist intake |
 | [`bonedigger-templates`](docs/skills/bonedigger-templates.md) | Adding, editing, or syncing GitHub issue templates; working on `sync-templates.yml` |
+| [`bonedigger-screenshots`](docs/skills/bonedigger-screenshots.md) | Screenshot capture, on-device screenshot analysis, and screenshot privacy rules for `ujust report` |
 
 ## Quick orientation
 
