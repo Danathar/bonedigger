@@ -105,7 +105,7 @@ Parsers must ignore any comment whose marker does not match this exact pattern, 
 
 Counts are derived read-side from the issue's comments; no state is stored anywhere but the comments themselves.
 
-- **confirmations** — number of confirmation comments (unchanged v1 meaning).
+- **confirmations** — number of confirmation comments (unchanged v1 meaning). A confirmation comment is one whose body starts with the header ``**System fingerprint** (via `ujust report --confirm`)`` emitted by `confirm_report` in `common`'s `/usr/libexec/bonedigger-report`. Triage, discussion and bot comments on the same issue are not confirmations and must not be counted.
 - **machines** — number of distinct `(author, fleet, machine)` triples among tagged confirmations.
 - **fleets** — number of distinct `(author, fleet)` pairs.
 - Untagged confirmations (opt-out users) are counted in `confirmations` only. Their issue data is never altered.
@@ -115,9 +115,11 @@ Presentation on the issue: `N confirmations · M distinct machines in F fleets (
 Reference implementation (input is the issue's comment list, e.g. `gh api --paginate repos/OWNER/REPO/issues/N/comments`; output verified against the acceptance cases below):
 
 ```jq
+def is_confirmation:
+  test("^\\*\\*System fingerprint\\*\\* \\(via `ujust report --confirm`\\)");
 def tag:
   capture("<!-- bonedigger-fleet: v1 fleet=(?<fleet>[0-9a-f]{16}) machine=(?<machine>[0-9a-f]{16}) -->") // null;
-[ .[] | {author: .user.login, tag: (.body | tag)} ] as $c
+[ .[] | select(.body | is_confirmation) | {author: .user.login, tag: (.body | tag)} ] as $c
 | ($c | map(select(.tag != null))) as $t
 | {
     confirmations: ($c | length),
@@ -128,6 +130,8 @@ def tag:
 ```
 
 `gh api --paginate` emits one JSON array per page; merge them first with `jq -s add`, then apply the filter with `jq -f`.
+
+The `is_confirmation` guard is what keeps the input honest: `repos/OWNER/REPO/issues/N/comments` returns every comment, including triage and bot chatter, and counting those would inflate `confirmations`. A consumer that already receives a pre-filtered confirmation-only list can drop the `select`, but must then guarantee the filtering elsewhere.
 
 ## Surfacing fleet-relevant issues — `ujust fleet-status`
 
@@ -144,11 +148,11 @@ Known limit: digests inside a gist attachment are not searchable by GitHub issue
 
 ## Confirmation escalation stays truthful
 
-The existing per-issue confirm escalation (thresholds at 3 and 5 confirmations) is unchanged and independent of fleet state:
+Confirmation-count escalation is a downstream intake concern, not something this repo ships today: bonedigger at this commit contains only `sync-templates.yml`, and `common`'s `docs/skills/bonedigger/references/full-loop.md` describes confirmations as human evidence rather than a label transition. No threshold configuration exists in either repo. The contract below is therefore what any such escalation **must** honour if and when it is implemented (the 3 and 5 confirmation thresholds referenced in issue #4 discussion are the intended values, not an implemented rule):
 
-- It keeps counting `confirmations` exactly as in v1. `machines` and `fleets` are display-only and must not be fed into, substituted for, or subtracted from that count.
+- It counts `confirmations` exactly as defined in [Counting](#counting-affected-machines) — confirmation comments only. `machines` and `fleets` are display-only and must not be fed into, substituted for, or subtracted from that count.
 - Enabling fleet tags on some or all reports changes nothing about when a threshold is crossed; disabling them likewise.
-- A fleet with 10 machines that confirmed once each is 10 confirmations and crosses the same thresholds it always did. The fleet line exists so a human reading the issue can discount them as one reporter; the priority call stays human.
+- A fleet with 10 machines that confirmed once each is 10 confirmations and crosses a threshold exactly as 10 unrelated reporters would. The fleet line exists so a human reading the issue can discount them as one reporter; the priority call stays human.
 
 ## Acceptance mapping
 
@@ -157,7 +161,7 @@ The existing per-issue confirm escalation (thresholds at 3 and 5 confirmations) 
 | Report without opting in sends no fleet tag; tag not reversible to a hostname and removable | Tag only emitted if `fleet.json` exists; tokens are random, not derived; `--fleet-forget[--purge]` | Client test: no `bonedigger-fleet` string in body without `fleet.json`; tokens uncorrelated with hostname/machine-id; after `--fleet-forget` no marker |
 | Three confirmations from one device = 1 machine; three opted-in machines = 3 | `(author, fleet, machine)` distinct count | Run the jq above: 3 comments with the same triple → `machines: 1`; 3 distinct `machine` values → `machines: 3` |
 | `ujust fleet-status` lists only relevant open issues with digest evidence; no consent-less enrollment | Local digest search + local verification; never writes `fleet.json` | Client test: closed and non-matching issues omitted; `fleet.json` absent afterward |
-| 3/5 escalation works with fleet correlation on or off | Fleet counts are display-only | Escalation input is `confirmations`; same fixture with and without markers yields the same value |
+| Confirmation-count escalation behaves identically with fleet correlation on or off | Fleet counts are display-only | Escalation input is `confirmations`; same fixture with and without markers yields the same value |
 
 ## Open review questions
 

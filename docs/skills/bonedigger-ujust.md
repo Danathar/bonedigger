@@ -5,8 +5,18 @@ Load when working on the client-side diagnostic reporting tool in `projectbluefi
 ## Commands
 
 ```bash
-ujust report         # collect diagnostics, review locally, upload to gist, open issue
+ujust report                      # collect diagnostics, review locally, upload to gist, open issue
+ujust report --confirm <issue>    # post a lightweight fingerprint comment on an existing issue
 ```
+
+`<issue>` is a positive issue number (routed to the booted image's own tracker: Bluefin LTS → `projectbluefin/bluefin-lts`, Bluefin → `projectbluefin/bluefin`, Dakota → `projectbluefin/dakota`, unknown → `projectbluefin/common`) or a full `https://github.com/OWNER/REPO/issues/N` URL, which uses its own repository and number.
+
+`--confirm` is implemented by `confirm_report` in `projectbluefin/common`, `system_files/bluefin/usr/libexec/bonedigger-report`. It:
+
+- collects only image ref, tag, version, booted digest, kernel, architecture and failed units — no OTel capture, no gist, no `machine-id`-derived identifier;
+- posts a comment whose body begins with the header ``**System fingerprint** (via `ujust report --confirm`)``, which is the marker downstream counting uses to tell confirmations apart from other comments;
+- previews the exact comment and requires `gum confirm` on a terminal; non-interactive use posts after printing the preview;
+- requires a signed-in `gh` (`gh auth login`).
 
 ## What `ujust report` collects
 
