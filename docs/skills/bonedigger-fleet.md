@@ -97,7 +97,7 @@ Tags are posted publicly as part of the user's own comment or issue body, so the
 
 - `--fleet-forget` stops future disclosure. It cannot recall what was already posted; the command says so.
 - `--purge` **edits** the user's own marker-bearing issue bodies and comments to remove only the marker line. GitHub has no comment-search API, and marker text inside an HTML comment is not reliably indexed by issue search, so discovery cannot be a single query. The mechanism is:
-  1. `gh search issues --author @me` and `gh search issues --commenter @me` (across the trackers in the routing table, `--state all`) to get candidate issues — these search by participation, not by marker text;
+  1. `gh search issues --author @me` and `gh search issues --commenter @me` (**unscoped — no `--repo` and no routing-table filter**, `--state all`) to get candidate issues — these search by participation, not by marker text. The search must not be narrowed to the trackers in the routing table: `parse_confirm_target` in `common`'s `/usr/libexec/bonedigger-report` accepts any `https://github.com/OWNER/REPO/issues/N` target, and `fleet-status` has a `--repo owner/name` override, so a tagged comment can exist in any repository the user can write to. Scoping discovery would silently leave those tags in place;
   2. for each candidate, `gh api --paginate repos/OWNER/REPO/issues/N/comments` plus the issue body, keep only items whose author login equals the authenticated login and whose body matches the marker regex;
   3. `gh issue comment --edit-last` is not sufficient; edit each match by id via `gh api --method PATCH repos/OWNER/REPO/issues/comments/<id>` (or `.../issues/N` for a body).
 
@@ -123,7 +123,7 @@ Counts are derived read-side from the issue's comments; no state is stored anywh
 - **fleets** — number of distinct `(author, fleet)` pairs over the same set.
 - Untagged confirmations (opt-out users) are counted in `confirmations` only. Their issue data is never altered.
 
-Presentation on the issue: `N confirmations · M distinct machines in F fleets (K untagged)`.
+Presentation on the issue: `N confirmations · M distinct machines in F fleets (K untagged)`, where `K` is the `untagged` field below — confirmation comments carrying no marker. `tagged` counts the issue body's marker too, so `tagged + untagged` can exceed `confirmations`.
 
 Reference implementation (input is `{"issue": <issue object>, "comments": [<comment objects>]}`, e.g. from `gh api repos/OWNER/REPO/issues/N` and `gh api --paginate repos/OWNER/REPO/issues/N/comments`; output verified against the acceptance cases below):
 
@@ -139,6 +139,7 @@ def tag:
 | {
     confirmations: ($c | length),
     tagged: ($t | length),
+    untagged: (($c | length) - ($ct | length)),
     machines: ($t | map([.author, .tag.fleet, .tag.machine]) | unique | length),
     fleets: ($t | map([.author, .tag.fleet]) | unique | length)
   }
