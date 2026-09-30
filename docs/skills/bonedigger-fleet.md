@@ -134,7 +134,7 @@ def tag:
   capture("<!-- bonedigger-fleet: v1 fleet=(?<fleet>[0-9a-f]{16}) machine=(?<machine>[0-9a-f]{16}) -->") // null;
 [ .comments[] | select(.body | is_confirmation) | {author: .user.login, tag: (.body | tag)} ] as $c
 | ($c | map(select(.tag != null))) as $ct
-| ([ {author: .issue.user.login, tag: (.issue.body | tag)} ] | map(select(.tag != null))) as $bt
+| ([ {author: .issue.user.login, tag: ((.issue.body // "") | tag)} ] | map(select(.tag != null))) as $bt
 | ($ct + $bt) as $t
 | {
     confirmations: ($c | length),
@@ -147,6 +147,8 @@ def tag:
 `gh api --paginate` emits one JSON array per page; merge them first with `jq -s add`, then combine with the issue object (e.g. `jq -n --slurpfile i issue.json --slurpfile c comments.json '{issue: $i[0], comments: ($c | add)}'`) before applying the filter with `jq -f`.
 
 The `is_confirmation` guard is what keeps the input honest: `repos/OWNER/REPO/issues/N/comments` returns every comment, including triage and bot chatter, and counting those would inflate `confirmations`. A consumer that already receives a pre-filtered confirmation-only list can drop the `select`, but must then guarantee the filtering elsewhere. The issue body deliberately bypasses the guard: it is read for its marker only, contributes to `machines` / `fleets`, and never to `confirmations`.
+
+The GitHub API returns `body: null` for an issue opened with an empty body, and `capture` aborts the whole filter on a non-string input, so the body is defaulted with `// ""` before matching. An untagged or empty body simply yields no triple.
 
 ## Surfacing fleet-relevant issues — `ujust fleet-status`
 
@@ -174,7 +176,7 @@ Confirmation-count escalation is a downstream intake concern, not something this
 | Acceptance criterion | How it is satisfied | Verification |
 |----------------------|--------------------|--------------|
 | Report without opting in sends no fleet tag; tag not reversible to a hostname and removable | Tag only emitted if `fleet.json` exists; tokens are random, not derived; `--fleet-forget[--purge]` | Client test: no `bonedigger-fleet` string in body without `fleet.json`; tokens uncorrelated with hostname/machine-id; after `--fleet-forget` no marker |
-| Three confirmations from one device = 1 machine; three opted-in machines = 3 | `(author, fleet, machine)` distinct count over tagged confirmations plus the tagged issue body | Run the jq above: 3 comments with the same triple (untagged issue body) → `machines: 1`; 3 distinct `machine` values → `machines: 3`, including the case where one of the three is the reporter's tagged issue body plus 2 confirmations |
+| Three confirmations from one device = 1 machine; three opted-in machines = 3 | `(author, fleet, machine)` distinct count over tagged confirmations plus the tagged issue body | Run the jq above: 3 comments with the same triple (untagged issue body) → `machines: 1`; 3 distinct `machine` values → `machines: 3`, including the case where one of the three is the reporter's tagged issue body plus 2 confirmations; an empty-body issue (`{"issue":{"user":{"login":"a"},"body":null},"comments":[]}`) must exit 0 with `confirmations: 0, machines: 0, fleets: 0` rather than erroring |
 | `ujust fleet-status` lists only relevant open issues with digest evidence; no consent-less enrollment | Local digest search + local verification; never writes `fleet.json` | Client test: closed and non-matching issues omitted; `fleet.json` absent afterward |
 | Confirmation-count escalation behaves identically with fleet correlation on or off | Fleet counts are display-only | Escalation input is `confirmations`; same fixture with and without markers yields the same value |
 
