@@ -160,7 +160,7 @@ Read-only, local, no enrollment.
 3. Fetch each candidate and **verify locally** that the digest appears in the issue body or a comment. Print only verified issues, each with its matching line as digest evidence, plus the current `confirmations · machines` line from [Counting](#counting-affected-machines).
 4. Print nothing about closed issues and never write to GitHub. It needs only a signed-in `gh`, like `--confirm`.
 
-**Validation (MUST).** `--digest` MUST match `^sha256:[0-9a-f]{64}$` and `--repo` MUST match `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; a value that fails is rejected before it is interpolated into the `gh search issues` query or a repository path, for the same reason the fleet tokens are validated.
+**Validation (MUST).** `--digest` MUST match `^sha256:[0-9a-f]{64}$` and `--repo` MUST match `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; a value that fails is rejected before it is interpolated into the `gh search issues` query or a repository path, for the same reason the fleet tokens are validated. The digest read from `bootc status --json` in step 1 MUST pass the same `^sha256:[0-9a-f]{64}$` check: the v1 client records `unknown` when bootc or jq is missing, and that value, or anything else that fails the check, stops the command with a message instead of being searched for.
 
 It does not read or require `fleet.json`, and never creates it.
 
